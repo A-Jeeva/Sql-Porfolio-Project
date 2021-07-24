@@ -1,0 +1,119 @@
+Data Exploration with AdventureWorks dataset
+
+Skills used - Row number(), Dense_rank, Sub queries, Exists, Join, CTE
+
+--- Product rank based on list price using Row number()
+
+	Select 
+	pp.Name as [Product Name],
+	pps.Name as [Product Subcategory Name],
+	ppc.Name as [Product Category Name],
+	pp.ListPrice,
+	ROW_NUMBER() over(order by pp.ListPrice desc) as [List Price Rank]
+
+	from [Production].[Product] pp
+	join [Production].[ProductSubcategory] pps
+	on pp.ProductSubcategoryID = pps.ProductSubcategoryID
+	join [Production].[ProductCategory] ppc
+	on pps.ProductCategoryID=ppc.ProductCategoryID
+
+--- Top 5 Product name of each product category based on distinct ListPrice using Dense_rank and subqueries
+
+	Select *
+	From
+	(Select 
+	pp.Name as [Product Name],
+	pps.Name as [Product Subcategory Name],
+	ppc.Name as [Product Category Name],
+	pp.ListPrice,
+	Dense_rank() over(partition by ppc.Name order by pp.ListPrice desc) as [Category Price Rank]
+
+	from [Production].[Product] pp
+	join [Production].[ProductSubcategory] pps
+	on pp.ProductSubcategoryID = pps.ProductSubcategoryID
+	join [Production].[ProductCategory] ppc
+	on pps.ProductCategoryID=ppc.ProductCategoryID) Productrank_listprice
+	
+	WHERE [Category Price Rank] <=5
+
+
+--- Sub Queries to return maximum amount of vacation hours for any one employee and return only employees who have at least 80% as much vacation time as the employee with the most vacation time.
+
+	SELECT 
+	BusinessEntityID,
+	JobTitle,
+	VacationHours,
+	(SELECT MAX(VacationHours) FROM [HumanResources].[Employee]) AS MaxVacationHours,
+	((VacationHours*1.0)/(SELECT MAX(VacationHours) FROM [HumanResources].[Employee])) AS PercentMaxVacationHours
+	FROM [HumanResources].[Employee]
+	WHERE ((VacationHours*1.0)/(SELECT MAX(VacationHours) FROM [HumanResources].[Employee])) >=0.8
+
+
+----Exist - Select all records from the Purchasing.PurchaseOrderHeader table such that there is at least one item in the order with an order quantity > 500 and unit price >50
+
+	SELECT 
+	PurchaseOrderID,
+	OrderDate,
+	SubTotal,
+	TaxAmt 
+	FROM [Purchasing].[PurchaseOrderHeader] poh
+	WHERE EXISTS(
+
+	SELECT
+	1
+	FROM [Purchasing].[PurchaseOrderDetail] pod
+	WHERE OrderQty > 500 
+	AND UnitPrice > 50
+	AND pod.PurchaseOrderID=poh.PurchaseOrderID
+	)
+	ORDER BY 1
+ 
+
+---CTE - Sum of monthly sales and purchases total dues excluding the top 10 orders per month
+
+	WITH SOH AS 
+	(
+	SELECT  
+	Orderdate,
+	TotalDue,
+	OrderMonth= DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1),
+	RankOrderMonth=ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+	FROM [Sales].[SalesOrderHeader]
+	),
+	SOHEXC AS
+	(
+	SELECT 
+	OrderMonth,
+	SUM(TotalDue) as SumSalesTotDue
+	FROM SOH
+	WHERE RankOrderMonth > 10
+	GROUP BY OrderMonth
+	),
+	POH AS
+	(
+	SELECT  
+	Orderdate,
+	TotalDue,
+	OrderMonth= DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1),
+	RankOrderMonth=ROW_NUMBER() OVER(PARTITION BY DATEFROMPARTS(YEAR(OrderDate),MONTH(OrderDate),1) ORDER BY TotalDue DESC)
+	FROM [Purchasing].[PurchaseOrderHeader]
+	),
+	POHEXC AS
+	(
+	SELECT 
+	OrderMonth,
+	SUM(TotalDue) as SumPurchaseTotDue
+	FROM POH
+	WHERE RankOrderMonth > 10
+	GROUP BY OrderMonth
+	)
+
+	SELECT 
+	A.OrderMonth,
+	A.SumSalesTotDue,
+	B.SumPurchaseTotDue
+
+	FROM SOHEXC A
+	JOIN POHEXC B
+	ON A.OrderMonth=B.OrderMonth
+	ORDER BY 1
